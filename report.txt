@@ -1,0 +1,143 @@
+Project 2 Final Report - Deep Learning for Image Classification
+Serenity Smith | Introduction to Deep Learning | Spring 2026
+
+-----------------------------------------------------------------
+
+DATASET
+
+For this project I used the Chest X-Ray Images (Pneumonia) dataset from Kaggle, originally sourced from the Guangzhou 
+Women and Children's Medical Center. The dataset contains 5,863 labeled chest X-ray images split into two classes: NORMAL 
+and PNEUMONIA. It already came pre-split into training, test, and validation folders which made the setup a lot easier. I 
+chose this dataset because the classification problem is straightforward and meaningful and being able to detect pneumonia 
+from an X-ray is actually useful in the real world, so it made the project feel more interesting than just classifying 
+random objects.
+
+-----------------------------------------------------------------
+
+WHAT I BUILT
+
+I built a Convolutional Neural Network (CNN) using TensorFlow and Keras to classify chest X-rays as either normal or showing 
+signs of pneumonia. The model has three convolutional blocks that progressively learn features from the images, starting with 
+simple edges and textures and building up to more complex patterns. After the convolutional layers, I flattened the output 
+and passed it through a fully connected Dense layer with Dropout before the final output layer.
+
+The preprocessing involved resizing all images to 64x64, normalizing pixel values from 0-255 down to 0-1, and loading 
+everything into train, test, and val sets using Keras ImageDataGenerator. The training set had 5,216 images, the test set 
+had 624, and the val set only had 16 which ended up being a limitation (more on that below).
+
+-----------------------------------------------------------------
+
+FIXING AN EVALUATION BUG 
+
+When I first evaluated the model, my confusion matrix and my test accuracy didn't agree. The correct predictions in the 
+matrix added up to about 62%, but model.evaluate reported 73%. If both were measuring the same thing, those numbers should
+have matched.
+
+The problem turned out to be shuffling. By default, flow_from_directory shuffles the images every time it loads them. So
+my predictions came out in a shuffled order, while the true labels (test_data.classes) stayed in the original folder order.
+Every prediction was being compared to the wrong image's label, kind of like grading a test against an answer key that got shuffled.
+
+I fixed it by setting shuffle=False on the test set only. The training set should still be shuffled because that helps the
+model learn. After rerunning everything, the confusion matrix matched the test accuracy exactly: (113 + 383)/624 = 79.49%.
+All the results below come from the corrected runs.
+
+-----------------------------------------------------------------
+
+RESULTS
+
+The model trained for 10 epochs and reached a training accuracy of 98.62%. The test accuracy came out to 79.49%, 
+which tells me the model was overfitting. So, it got really good at the training data but didn't generalize perfectly to 
+new images.
+
+Looking at the confusion matrix gave a clearer picture of what was actually going on:
+
+- 383 out of 390 pneumonia cases were correctly identified (98% -- very strong)
+- 113 out of 234 normal cases were correctly identified (not good)
+- 121 normal X-rays were incorrectly predicted as pneumonia
+- 7 pneumonia cases were missed entirely
+
+The model was biased toward predicting pneumonia. It got really good at catching actual pneumonia cases but
+struggled with normal X-rays, flagging 121 of them incorrectly. My first guess was the class distribution:
+there were 3,875 pneumonia images in training compared to only 1,341 normal ones, so the model may have
+learned that pneumonia was the safer prediction. I tested that idea in the next section.
+
+-----------------------------------------------------------------
+
+IMPROVEMENT ATTEMPT - BALANCING THE DATA
+
+After seeing those results I wanted to try to fix the class imbalance, so I went back and modified my preprocessing step. 
+I undersampled the pneumonia class by randomly selecting only 1,341 pneumonia images to match the number of normal images, 
+bringing the total training set down from 5,216 to 2,682 images. When I plotted the new class distribution both bars were 
+exactly equal at 1,341 each.
+
+Then I trained a brand new model with the same architecture on the balanced set and tested it on the same
+624 test images. Here's how it compared to the full dataset model:
+
+                           Full Dataset    Undersampled
+  Test accuracy            79.49%          79.97%
+  Normal correct           113 / 234       120 / 234
+  Normal flagged wrong     121             114
+  Pneumonia correct        383 / 390       379 / 390
+  Pneumonia missed         7               11
+
+The results were almost the same. Undersampling got 7 more normal X-rays right, but it missed 4 more
+pneumonia cases, and overall accuracy only went up by about half a percent. Since I only trained each model
+once, and results shift a bit every time you retrain, a difference this small doesn't really tell me one is
+better than the other.
+
+The more interesting part is what didn't change. Even with perfectly balanced classes, the model still
+flagged about half of the normal X-rays as pneumonia. That means the class imbalance wasn't the main reason
+the model struggled with normal cases. My best guess is the 64x64 image size, which throws away a lot of
+the fine detail that separates a healthy lung from a sick one.
+
+I kept the full dataset for the final model. Undersampling didn't really fix the problem, it threw away over
+2,500 training images, and the full model missed fewer pneumonia cases (7 vs 11), which is the mistake that
+matters most in medical screening.
+
+
+-----------------------------------------------------------------
+
+STRENGTHS AND LIMITATIONS
+
+On the positive side, the model was exceptional at catching actual pneumonia cases. It correctly identified 98% of them 
+(383 out of 390) and only missed 7. For a simple CNN trained in about 5 minutes on a CPU, that is a strong result. The Dropout layer I included 
+also helped reduce overfitting, and I gained a lot from catching the evaluation bug and testing undersampling, which showed that the imbalance
+wasn't the only thing holding the model back.
+
+The main limitations were the model's trouble with normal cases and the tiny validation set. It only correctly
+identified 113 out of 234 normal X-rays, which is something that needs to be addressed in future iterations.
+Having only 16 images in the val set also made the validation metrics really noisy, and you can see it in the
+loss graph where the val loss is jumping all over the place. That is not a reflection of the model being bad,
+it is just that 16 images is not enough to get a stable read on performance.
+
+The gap between training accuracy (98.62%) and test accuracy (79.49%) also points to overfitting. The model memorized the training data a 
+little too well and did not fully generalize.
+
+-----------------------------------------------------------------
+
+WHAT I WOULD DO DIFFERENTLY
+
+If I were to improve this model, one thing I would try is using data augmentation on the normal images instead of undersampling 
+the pneumonia ones. Generating flipped, rotated, or zoomed versions of normal X-rays would balance the dataset without throwing 
+away useful data. I already included Dropout in the model which helps with overfitting, but adding early stopping during training 
+would also help as it would stop training automatically when the model stops improving instead of just running all 10 epochs regardless.
+
+After the undersampling results, I would try increasing the image size from 64x64 to something like 128x128. Downscaling to 64x64 loses a lot of detail in medical images, 
+and chest X-rays have subtle features that matter. A larger input size could help the model pick up on those finer details and probably improve 
+accuracy on normal cases specifically. Another option would be using class weights which essentially is telling the model to penalize mistakes on 
+normal images more heavily during training, which would push it to pay more attention to the underrepresented class without removing any data.
+
+-----------------------------------------------------------------
+
+FINAL THOUGHTS
+
+Overall this project gave me a good feel for how CNNs work in practice. The most valuable part was actually
+the stuff that didn't go as planned. Catching the shuffling bug taught me to always check that my numbers
+agree with each other. If I had only looked at the confusion matrix, or only looked at the accuracy, I never
+would have noticed that something was off. Testing undersampling also taught me something I didn't expect.
+I assumed the class imbalance was the whole reason the model struggled with normal X-rays, but balancing the
+classes barely changed anything. That showed me the obvious explanation isn't always the right one, and that
+you have to actually test your assumptions instead of trusting them. The confusion matrix was also way more
+informative than the accuracy number alone. Accuracy made the model seem okay, but the matrix showed exactly
+where it was struggling. The biggest takeaway for me is that data quality, preprocessing, and evaluation
+decisions matter just as much as the model architecture itself.
